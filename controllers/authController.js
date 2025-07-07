@@ -10,13 +10,21 @@ const requestMagicLink = async (req, res) => {
     return res.status(400).json({ error: "Email and app ID are required" });
   }
   try {
-    const client = await Client.findOne({ id });
+    const client = await Client.findById(id);
     if (!client) return res.status(404).json({ error: "Invalid app ID" });
 
     let user = await User.findOne({ email, clientId: client._id });
     if (!user) {
-      user = await User.create({ email, clientId: client._id });
+      user = await User.create({
+        email,
+        clientId: client._id,
+        lastLogin: null,
+      });
     }
+
+    // Update lastLogin when requesting magic link
+    user.lastLogin = new Date();
+    await user.save();
 
     const token = crypto.randomBytes(32).toString("hex");
 
@@ -29,9 +37,9 @@ const requestMagicLink = async (req, res) => {
       })
     );
 
-    const magicLink = `${BASE_URL}/auth/magic-link/verify?token=${token}&appId=${appId}`;
+    const magicLink = `${BASE_URL}/auth/magic-link/verify?token=${token}`;
     return res.json({
-      message: "Check your inbo for the magic link",
+      message: "Check your inbox for the magic link",
     });
   } catch (error) {
     console.error("Error generating magic link:", error);
@@ -39,4 +47,27 @@ const requestMagicLink = async (req, res) => {
   }
 };
 
-export { requestMagicLink };
+const verifyMagicLink = async (req, res) => {
+  const { token } = req.query;
+  if (!token) {
+    return res.status(400).json({ error: "Token is required" });
+  }
+
+  try {
+    const data = await redis.get(`magic_token:${token}`);
+    if (!data)
+      return res.status(400).json({ error: "Invalid or expired token" });
+
+    const { userId } = JSON.parse(data);
+
+    //  Delete the token after verification
+    await redis.del(`magic_token:${token}`);
+
+    return res.json({ message: "Magic link verified successfully", userId });
+  } catch (error) {
+    console.error("Error verifying magic link:", error);
+    return res.status(500).json({ error: "Internal server error" });
+  }
+};
+
+export { requestMagicLink, verifyMagicLink };

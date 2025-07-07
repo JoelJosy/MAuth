@@ -17,6 +17,10 @@ const userSchema = new mongoose.Schema(
       ref: "Client",
       required: true,
     },
+    lastLogin: {
+      type: Date,
+      default: null,
+    },
   },
   { timestamps: true }
 );
