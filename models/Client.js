@@ -6,6 +6,7 @@ const clientSchema = new mongoose.Schema(
       type: String,
       required: true,
       unique: true,
+      lowercase: true,
     },
     publicKey: {
       type: String,
