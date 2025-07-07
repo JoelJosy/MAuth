@@ -27,7 +27,6 @@
     "jsonwebtoken": "^9.0.2",
     "mongodb": "^6.17.0",
     "mongoose": "^8.16.1",
-    "pem-jwk": "^2.0.0",
     "redis": "^5.5.6"
   },
   "devDependencies": {

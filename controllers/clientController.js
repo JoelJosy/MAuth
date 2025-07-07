@@ -6,7 +6,6 @@ import {
 } from "crypto";
 import { encryptPrivateKey } from "../utils/encryptKeys.js";
 import Client from "../models/Client.js";
-import { pem2jwk } from "pem-jwk";
 
 const registerClient = async (req, res) => {
   const { name } = req.body;
@@ -106,24 +105,4 @@ const rotateClientKeys = async (req, res) => {
   }
 };
 
-const getJWK = async (req, res) => {
-  const { id } = req.params;
-  try {
-    // Fetch the client by id
-    const client = await Client.findById(id);
-    if (!client) {
-      return res.status(404).json({ error: "Client not found" });
-    }
-    // Convert the public key to JWK format
-    const jwk = pem2jwk(client.publicKey);
-    jwk.use = "sig";
-    jwk.alg = "RS256";
-    jwk.kid = client.kid;
-    res.status(200).json(jwk);
-  } catch (error) {
-    console.error("Error fetching JWKS:", error);
-    return res.status(500).json({ error: "Internal server error" });
-  }
-};
-
-export { registerClient, rotateClientKeys, getJWK };
+export { registerClient, rotateClientKeys };

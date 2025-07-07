@@ -4,6 +4,7 @@ import connectToDatabase from "./database/mongodb.js";
 import errorMiddleware from "./middleware/error.js";
 import clientRoutes from "./routes/client.js";
 import authRoutes from "./routes/auth.js";
+import jwksRoutes from "./routes/jwks.js";
 
 const app = express();
 
@@ -14,6 +15,7 @@ app.use(express.urlencoded({ extended: true })); // Parse URL-encoded request bo
 // Routes
 app.use("/clients", clientRoutes);
 app.use("/auth", authRoutes);
+app.use("/", jwksRoutes);
 
 app.use(errorMiddleware); // Last middleware for error handling
 app.get("/", (req, res) => {
