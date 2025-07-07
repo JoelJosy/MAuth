@@ -3,6 +3,7 @@ import redis from "../config/redis.js";
 import User from "../models/User.js";
 import { BASE_URL } from "../config/env.js";
 import Client from "../models/Client.js";
+import { generateTokens } from "../utils/jwt.js";
 
 const requestMagicLink = async (req, res) => {
   const { email, id } = req.body;
@@ -58,12 +59,21 @@ const verifyMagicLink = async (req, res) => {
     if (!data)
       return res.status(400).json({ error: "Invalid or expired token" });
 
-    const { userId } = JSON.parse(data);
+    const { userId, clientId } = JSON.parse(data);
 
     //  Delete the token after verification
     await redis.del(`magic_token:${token}`);
 
-    return res.json({ message: "Magic link verified successfully", userId });
+    const { accessToken, refreshToken } = await generateTokens({
+      userId,
+      clientId,
+    });
+
+    return res.json({
+      message: "Magic link verified successfully",
+      accessToken,
+      refreshToken,
+    });
   } catch (error) {
     console.error("Error verifying magic link:", error);
     return res.status(500).json({ error: "Internal server error" });
