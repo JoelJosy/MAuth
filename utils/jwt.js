@@ -36,4 +36,30 @@ const generateTokens = async ({ userId, clientId }) => {
   return { accessToken, refreshToken };
 };
 
-export { generateTokens };
+// This is for development purposes only
+const verifyToken = async (token) => {
+  try {
+    // Decode the token header to get the key ID
+    const decoded = jwt.decode(token, { complete: true });
+    if (!decoded || !decoded.header.kid) {
+      throw new Error("Invalid token: missing key ID");
+    }
+
+    // Fetch the client using the key ID
+    const client = await Client.findOne({ kid: decoded.header.kid });
+    if (!client) {
+      throw new Error("Client not found for key ID");
+    }
+
+    // Verify the token using the client's public key
+    const payload = jwt.verify(token, client.publicKey, {
+      algorithms: ["RS256"],
+    });
+
+    return payload;
+  } catch (error) {
+    throw new Error(`Token verification failed: ${error.message}`);
+  }
+};
+
+export { generateTokens, verifyToken };

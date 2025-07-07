@@ -3,7 +3,7 @@ import redis from "../config/redis.js";
 import User from "../models/User.js";
 import { BASE_URL } from "../config/env.js";
 import Client from "../models/Client.js";
-import { generateTokens } from "../utils/jwt.js";
+import { generateTokens, verifyToken } from "../utils/jwt.js";
 
 const requestMagicLink = async (req, res) => {
   const { email, id } = req.body;
@@ -80,4 +80,44 @@ const verifyMagicLink = async (req, res) => {
   }
 };
 
-export { requestMagicLink, verifyMagicLink };
+const verifyJWT = async (req, res) => {
+  const { token } = req.body;
+
+  if (!token) {
+    return res.status(400).json({ error: "Token is required" });
+  }
+
+  try {
+    const payload = await verifyToken(token);
+
+    // Fetch user details to return additional information
+    const user = await User.findById(payload.userId);
+    const client = await Client.findById(payload.clientId);
+
+    return res.json({
+      valid: true,
+      payload: {
+        userId: payload.userId,
+        clientId: payload.clientId,
+        kid: payload.kid,
+        iat: payload.iat,
+        exp: payload.exp,
+      },
+      user: {
+        email: user?.email,
+        lastLogin: user?.lastLogin,
+      },
+      client: {
+        name: client?.name,
+      },
+    });
+  } catch (error) {
+    console.error("Token verification error:", error);
+    return res.status(401).json({
+      valid: false,
+      error: error.message,
+    });
+  }
+};
+
+export { requestMagicLink, verifyMagicLink, verifyJWT };
