@@ -3,6 +3,7 @@ import { PORT } from "./config/env.js";
 import connectToDatabase from "./database/mongodb.js";
 import errorMiddleware from "./middleware/error.js";
 import clientRoutes from "./routes/client.js";
+import authRoutes from "./routes/auth.js";
 
 const app = express();
 
@@ -12,6 +13,7 @@ app.use(express.urlencoded({ extended: true })); // Parse URL-encoded request bo
 
 // Routes
 app.use("/clients", clientRoutes);
+app.use("/auth", authRoutes);
 
 app.use(errorMiddleware); // Last middleware for error handling
 app.get("/", (req, res) => {

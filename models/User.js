@@ -14,20 +14,8 @@ const userSchema = new mongoose.Schema(
     },
     clientId: {
       type: mongoose.Schema.Types.ObjectId,
-      ref: 'Client',
-      required: true
-    },
-    isVerified: { 
-      type: Boolean, default: false 
-    },
-    loginAttempts: { 
-      type: Number, default: 0 
-    },
-    lockoutUntil: {
-      Date: Date, default: null
-    },
-    lastLogin: {
-      Date: Date, default: null
+      ref: "Client",
+      required: true,
     },
   },
   { timestamps: true }
