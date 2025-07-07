@@ -3,7 +3,7 @@ import { DB_URI } from "../config/env.js";
 
 if (!DB_URI) {
   throw new Error(
-    "Please define the MONGODB_URI environment variable inside .env.<development/production>.local"
+    "Please define the MONGODB_URI environment variable inside .env"
   );
 }
 
