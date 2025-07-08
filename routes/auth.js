@@ -7,17 +7,31 @@ import {
   revokeRefreshToken,
   revokeAllTokens,
 } from "../controllers/authController.js";
+import {
+  strictRateLimit,
+  moderateRateLimit,
+  lenientRateLimit,
+  rateLimit,
+} from "../middleware/rateLimit.js";
 
 const router = express.Router();
 
-router.post("/magic-link/request", requestMagicLink);
-router.post("/magic-link/verify", verifyMagicLink);
+const magicLinkRequestLimit = rateLimit({
+  keyPrefix: "magic_request",
+  limit: 5,
+  windowDuration: 300,
+  strategy: "hybrid",
+  ipLimit: 15, // Allow more requests per IP to handle offices/families
+  ipWindowDuration: 300,
+}); // 5 per email per 5min + 15 per IP per 5min
 
-// for testing purposes only
-router.post("/verify-token", verifyJWT);
+router.post("/magic-link/request", magicLinkRequestLimit, requestMagicLink);
 
-router.post("/refresh-token", refreshTokens);
-router.post("/revoke-token", revokeRefreshToken);
-router.post("/revoke-all-tokens", revokeAllTokens);
+router.post("/magic-link/verify", moderateRateLimit, verifyMagicLink);
+
+router.post("/refresh-token", moderateRateLimit, refreshTokens);
+router.post("/verify-token", lenientRateLimit, verifyJWT);
+router.post("/revoke-token", moderateRateLimit, revokeRefreshToken);
+router.post("/revoke-all-tokens", strictRateLimit, revokeAllTokens);
 
 export default router;
