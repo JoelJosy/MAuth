@@ -6,6 +6,8 @@ import User from "../models/User.js";
 import Client from "../models/Client.js";
 import RefreshToken from "../models/RefreshToken.js";
 import { generateTokens, verifyToken } from "../utils/jwt.js";
+import { sendEmail } from "../utils/sendEmail.js";
+import { generateEmailTemplate } from "../utils/emailTemplate.js";
 
 const requestMagicLink = async (req, res) => {
   const { email, id } = req.body;
@@ -21,13 +23,9 @@ const requestMagicLink = async (req, res) => {
       user = await User.create({
         email,
         clientId: client._id,
-        lastLogin: null,
+        lastLogin: null, // Don't set lastLogin on registration
       });
     }
-
-    // Update lastLogin when requesting magic link
-    user.lastLogin = new Date();
-    await user.save();
 
     const token = crypto.randomBytes(32).toString("hex");
 
@@ -42,6 +40,34 @@ const requestMagicLink = async (req, res) => {
     );
 
     const magicLink = `${BASE_URL}/auth/magic-link/verify?token=${token}`;
+
+    // Generate and send email
+    try {
+      const emailTemplate = generateEmailTemplate(
+        magicLink,
+        client.name,
+        email
+      );
+
+      await sendEmail({
+        to: email,
+        subject: emailTemplate.subject,
+        html: emailTemplate.html,
+        text: emailTemplate.text,
+      });
+
+      console.log(
+        `Magic link email sent to ${email} for client ${client.name}`
+      );
+    } catch (emailError) {
+      console.error("Failed to send magic link email:", emailError);
+      // Clean up the Redis token since email failed
+      await redis.del(`magic_token:${token}`);
+      return res.status(500).json({
+        error: "Failed to send email. Please try again later.",
+      });
+    }
+
     return res.json({
       message: "Check your inbox for the magic link",
     });
@@ -66,6 +92,9 @@ const verifyMagicLink = async (req, res) => {
 
     // Delete the magic token after use
     await redis.del(`magic_token:${token}`);
+
+    // Update lastLogin on successful verification
+    await User.findByIdAndUpdate(userId, { lastLogin: new Date() });
 
     const { accessToken, refreshToken } = await generateTokens({
       userId,
