@@ -73,13 +73,12 @@ const verifyMagicLink = async (req, res) => {
     });
 
     // Set tokens as HTTP-only cookies
-    // Adjust 'secure' to true if using HTTPS in production
     res.cookie("accessToken", accessToken, {
       httpOnly: true,
       secure: process.env.NODE_ENV === "production",
-      sameSite: "lax", // or "strict" or "none" with secure=true
-      maxAge: 15 * 60 * 1000, // 15 minutes
-      path: "/", // cookie valid for entire domain
+      sameSite: process.env.NODE_ENV === "production" ? "none" : "lax", // Better cross-origin handling
+      maxAge: 15 * 60 * 1000,
+      path: "/",
     });
 
     res.cookie("refreshToken", refreshToken, {
@@ -90,12 +89,11 @@ const verifyMagicLink = async (req, res) => {
       path: "/",
     });
 
-    // Optionally redirect to client app or send success message
     return res.json({
       message: "Magic link verified successfully, tokens set in cookies",
     });
 
-    // Or redirect example:
+    // redirect example:
     // return res.redirect(`${client.redirectUrl}?status=success`);
   } catch (error) {
     console.error("Error verifying magic link:", error);
