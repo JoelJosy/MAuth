@@ -1,4 +1,5 @@
 import express from "express";
+import cors from "cors";
 import { PORT } from "./config/env.js";
 import connectToDatabase from "./database/mongodb.js";
 import errorMiddleware from "./middleware/error.js";
@@ -7,6 +8,13 @@ import authRoutes from "./routes/auth.js";
 import jwksRoutes from "./routes/jwks.js";
 
 const app = express();
+
+app.use(
+  cors({
+    origin: true,
+    credentials: true, // Allow cookies to be sent
+  })
+);
 
 // Middleware
 app.use(express.json()); // Parse JSON request bodies
