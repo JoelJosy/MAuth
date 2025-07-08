@@ -37,6 +37,7 @@ const requestMagicLink = async (req, res) => {
       JSON.stringify({
         userId: user._id.toString(),
         clientId: client._id.toString(),
+        redirectUrl: client.redirectUrl,
       })
     );
 
@@ -63,7 +64,7 @@ const verifyMagicLink = async (req, res) => {
 
     const { userId, clientId } = JSON.parse(data);
 
-    //  Delete the token after verification
+    // Delete the magic token after use
     await redis.del(`magic_token:${token}`);
 
     const { accessToken, refreshToken } = await generateTokens({
@@ -71,11 +72,31 @@ const verifyMagicLink = async (req, res) => {
       clientId,
     });
 
-    return res.json({
-      message: "Magic link verified successfully",
-      accessToken,
-      refreshToken,
+    // Set tokens as HTTP-only cookies
+    // Adjust 'secure' to true if using HTTPS in production
+    res.cookie("accessToken", accessToken, {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === "production",
+      sameSite: "lax", // or "strict" or "none" with secure=true
+      maxAge: 15 * 60 * 1000, // 15 minutes
+      path: "/", // cookie valid for entire domain
     });
+
+    res.cookie("refreshToken", refreshToken, {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === "production",
+      sameSite: "lax",
+      maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
+      path: "/",
+    });
+
+    // Optionally redirect to client app or send success message
+    return res.json({
+      message: "Magic link verified successfully, tokens set in cookies",
+    });
+
+    // Or redirect example:
+    // return res.redirect(`${client.redirectUrl}?status=success`);
   } catch (error) {
     console.error("Error verifying magic link:", error);
     return res.status(500).json({ error: "Internal server error" });
@@ -83,19 +104,18 @@ const verifyMagicLink = async (req, res) => {
 };
 
 const verifyJWT = async (req, res) => {
-  const token = req.headers.authorization?.split(" ")[1];
+  // Try Authorization header first, then fall back to cookie
+  const token =
+    req.headers.authorization?.split(" ")[1] || req.cookies?.accessToken;
 
   if (!token) {
-    return res.status(400).json({ error: "Token is required" });
+    return res.status(400).json({ error: "Access token is required" });
   }
 
   try {
     const payload = await verifyToken(token);
 
-    // Fetch user details to return additional information
     const user = await User.findById(payload.userId);
-
-    // Get client info from the kid (Key ID) instead of clientId
     const client = await Client.findOne({ kid: payload.kid });
 
     return res.json({
@@ -126,10 +146,11 @@ const verifyJWT = async (req, res) => {
 };
 
 const refreshTokens = async (req, res) => {
-  const { token } = req.body;
+  const token = req.cookies?.refreshToken;
 
-  if (!token)
-    return res.status(400).json({ error: "Refresh token is required" });
+  if (!token) {
+    return res.status(400).json({ error: "Refresh token is missing" });
+  }
 
   try {
     const decoded = jwt.decode(token, { complete: true });
@@ -144,7 +165,6 @@ const refreshTokens = async (req, res) => {
       return res.status(403).json({ error: "Token expired" });
     }
 
-    // Get client public key for verification
     const client = await Client.findOne({ kid: decoded.header.kid });
     if (!client) throw new Error("Client not found");
 
@@ -152,14 +172,28 @@ const refreshTokens = async (req, res) => {
       algorithms: ["RS256"],
     });
 
-    // Rotate and generate new tokens
     const { accessToken, refreshToken } = await generateTokens({
       userId: payload.userId,
-      clientId: existing.clientId, // Get clientId from database record, not JWT payload
+      clientId: existing.clientId,
       prevRefreshToken: token,
     });
 
-    return res.json({ accessToken, refreshToken });
+    // Set cookies
+    res.cookie("accessToken", accessToken, {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === "production",
+      sameSite: "lax",
+      maxAge: 15 * 60 * 1000,
+    });
+
+    res.cookie("refreshToken", refreshToken, {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === "production",
+      sameSite: "lax",
+      maxAge: 7 * 24 * 60 * 60 * 1000,
+    });
+
+    return res.json({ message: "Tokens refreshed successfully" });
   } catch (err) {
     console.error("Refresh error:", err);
     return res.status(401).json({ error: "Invalid refresh token" });
@@ -167,7 +201,8 @@ const refreshTokens = async (req, res) => {
 };
 
 const revokeRefreshToken = async (req, res) => {
-  const { token, revokeAll = false } = req.body;
+  const { revokeAll = false } = req.body;
+  const token = req.cookies?.refreshToken;
 
   if (!revokeAll && !token) {
     return res.status(400).json({
@@ -176,31 +211,21 @@ const revokeRefreshToken = async (req, res) => {
   }
 
   try {
+    const decoded = jwt.decode(token, { complete: true });
+    if (!decoded?.header?.kid) {
+      return res.status(400).json({ error: "Invalid token format" });
+    }
+
+    const client = await Client.findOne({ kid: decoded.header.kid });
+    if (!client) {
+      return res.status(404).json({ error: "Client not found" });
+    }
+
+    const payload = jwt.verify(token, client.publicKey, {
+      algorithms: ["RS256"],
+    });
+
     if (revokeAll) {
-      // Extract userId from the provided token to revoke all tokens for that user
-      if (!token) {
-        return res.status(400).json({
-          error: "Token is required to identify user for revoking all tokens",
-        });
-      }
-
-      const decoded = jwt.decode(token, { complete: true });
-      if (!decoded?.header?.kid) {
-        return res.status(400).json({ error: "Invalid token format" });
-      }
-
-      // Get client to verify the token
-      const client = await Client.findOne({ kid: decoded.header.kid });
-      if (!client) {
-        return res.status(404).json({ error: "Client not found" });
-      }
-
-      // Verify token to get userId
-      const payload = jwt.verify(token, client.publicKey, {
-        algorithms: ["RS256"],
-      });
-
-      // Revoke all tokens for this user and client
       const result = await RefreshToken.updateMany(
         {
           userId: payload.userId,
@@ -213,12 +238,15 @@ const revokeRefreshToken = async (req, res) => {
         }
       );
 
+      // Clear cookies
+      res.clearCookie("accessToken");
+      res.clearCookie("refreshToken");
+
       return res.json({
         message: "All refresh tokens revoked successfully",
         tokensRevoked: result.modifiedCount,
       });
     } else {
-      // Revoke specific token
       const existing = await RefreshToken.findOne({ token });
       if (!existing) {
         return res.status(404).json({ error: "Token not found" });
@@ -228,30 +256,18 @@ const revokeRefreshToken = async (req, res) => {
         return res.status(400).json({ error: "Token already revoked" });
       }
 
-      // Verify token is valid before revoking
-      const decoded = jwt.decode(token, { complete: true });
-      if (!decoded?.header?.kid) {
-        return res.status(400).json({ error: "Invalid token format" });
-      }
-
-      const client = await Client.findOne({ kid: decoded.header.kid });
-      if (!client) {
-        return res.status(404).json({ error: "Client not found" });
-      }
-
-      // Verify token signature
       jwt.verify(token, client.publicKey, {
         algorithms: ["RS256"],
       });
 
-      // Revoke the token
       existing.revoked = true;
       existing.replacedBy = "manually_revoked";
       await existing.save();
 
-      return res.json({
-        message: "Refresh token revoked successfully",
-      });
+      res.clearCookie("accessToken");
+      res.clearCookie("refreshToken");
+
+      return res.json({ message: "Refresh token revoked successfully" });
     }
   } catch (error) {
     console.error("Error revoking refresh token:", error);

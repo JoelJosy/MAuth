@@ -21,6 +21,7 @@
   },
   "homepage": "https://github.com/JoelJosy/MAuth#readme",
   "dependencies": {
+    "cookie-parser": "^1.4.7",
     "cors": "^2.8.5",
     "dayjs": "^1.11.13",
     "dotenv": "^17.0.1",

@@ -1,5 +1,6 @@
 import express from "express";
 import cors from "cors";
+import cookieParser from "cookie-parser";
 import { PORT } from "./config/env.js";
 import connectToDatabase from "./database/mongodb.js";
 import errorMiddleware from "./middleware/error.js";
@@ -19,6 +20,7 @@ app.use(
 // Middleware
 app.use(express.json()); // Parse JSON request bodies
 app.use(express.urlencoded({ extended: true })); // Parse URL-encoded request bodies
+app.use(cookieParser()); // Parse cookies from request headers
 
 // Routes
 app.use("/clients", clientRoutes);
