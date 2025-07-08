@@ -52,6 +52,9 @@ const registerClient = async (req, res) => {
       name: client.name,
       id: client._id,
       publicKey: client.publicKey,
+      apiKey: client.apiKey,
+      warning:
+        "Store this API key securely! You'll need it for all client operations.",
     });
   } catch (error) {
     console.error("Error registering client:", error);
@@ -60,14 +63,9 @@ const registerClient = async (req, res) => {
 };
 
 const rotateClientKeys = async (req, res) => {
-  const { id } = req.params;
-
   try {
-    // Find the client
-    const client = await Client.findById(id);
-    if (!client) {
-      return res.status(404).json({ error: "Client not found" });
-    }
+    // Client is already validated and attached by middleware
+    const client = req.client;
 
     // Generate new key pair
     const { publicKey, privateKey } = generateKeyPairSync("rsa", {
@@ -105,4 +103,27 @@ const rotateClientKeys = async (req, res) => {
   }
 };
 
-export { registerClient, rotateClientKeys };
+const getClientInfo = async (req, res) => {
+  try {
+    // Client is already validated and attached by middleware
+    const client = req.client;
+
+    res.status(200).json({
+      message: "Client information retrieved successfully",
+      client: {
+        id: client._id,
+        name: client.name,
+        kid: client.kid,
+        publicKey: client.publicKey,
+        createdAt: client.createdAt,
+        updatedAt: client.updatedAt,
+        apiKeyLastUsed: client.apiKeyLastUsed,
+      },
+    });
+  } catch (error) {
+    console.error("Error getting client info:", error);
+    return res.status(500).json({ error: "Internal server error" });
+  }
+};
+
+export { registerClient, rotateClientKeys, getClientInfo };

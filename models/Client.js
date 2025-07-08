@@ -1,4 +1,5 @@
 import mongoose from "mongoose";
+import crypto from "crypto";
 
 const clientSchema = new mongoose.Schema(
   {
@@ -28,6 +29,18 @@ const clientSchema = new mongoose.Schema(
       type: String,
       required: true,
       default: () => crypto.randomUUID(), // for JWKS
+    },
+    // Unique API key for each client
+    apiKey: {
+      type: String,
+      required: true,
+      unique: true,
+      default: () => crypto.randomBytes(32).toString("hex"),
+    },
+    // Track API key usage for monitoring
+    apiKeyLastUsed: {
+      type: Date,
+      default: null,
     },
   },
   { timestamps: true }
