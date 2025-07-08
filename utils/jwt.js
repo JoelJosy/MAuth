@@ -1,36 +1,65 @@
 import jwt from "jsonwebtoken";
+import crypto from "crypto";
 import { decryptPrivateKey } from "./encryptKeys.js";
 import Client from "../models/Client.js";
+import RefreshToken from "../models/RefreshToken.js";
 
 const ACCESS_TOKEN_EXPIRY = "15m";
 const REFRESH_TOKEN_EXPIRY = "7d";
 
-const generateTokens = async ({ userId, clientId }) => {
-  // Fetch client to get encrypted private key
+const generateTokens = async ({
+  userId,
+  clientId,
+  prevRefreshToken = null,
+}) => {
   const client = await Client.findById(clientId);
-  if (!client) {
-    throw new Error("Client not found");
-  }
+  if (!client) throw new Error("Client not found");
 
-  // Decrypt the private key
   const privateKey = decryptPrivateKey(
     client.encryptedPrivateKey,
     client.iv,
     client.tag
   );
+  const accessTokenPayload = {
+    userId,
+    kid: client.kid,
+    type: "access",
+    iss: client.name,
+  };
+  const refreshTokenPayload = {
+    userId,
+    kid: client.kid,
+    type: "refresh",
+    iss: client.name,
+  };
 
-  const payload = { userId, clientId, kid: client.kid };
-
-  const accessToken = jwt.sign(payload, privateKey, {
+  const accessToken = jwt.sign(accessTokenPayload, privateKey, {
     algorithm: "RS256",
     expiresIn: ACCESS_TOKEN_EXPIRY,
     keyid: client.kid,
   });
 
-  const refreshToken = jwt.sign(payload, privateKey, {
+  const refreshToken = jwt.sign(refreshTokenPayload, privateKey, {
     algorithm: "RS256",
     expiresIn: REFRESH_TOKEN_EXPIRY,
     keyid: client.kid,
+  });
+
+  const decoded = jwt.decode(refreshToken);
+
+  // Revoke old token if rotating
+  if (prevRefreshToken) {
+    await RefreshToken.findOneAndUpdate(
+      { token: prevRefreshToken },
+      { revoked: true, replacedBy: refreshToken }
+    );
+  }
+
+  await RefreshToken.create({
+    token: refreshToken,
+    userId,
+    clientId,
+    expiresAt: new Date(decoded.exp * 1000),
   });
 
   return { accessToken, refreshToken };
