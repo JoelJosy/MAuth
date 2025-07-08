@@ -17,15 +17,14 @@ const rateLimit = ({
         // Single email check
         const emailKey = `${keyPrefix}:email:${req.body.email}`;
         multi.incr(emailKey);
-        multi.ttl(emailKey);
         multi.expire(emailKey, windowDuration);
 
-        const [current, ttl] = await multi.exec();
+        const [current] = await multi.exec();
 
         if (current > limit) {
           return res.status(429).json({
             error: "Rate limit exceeded (email). Please try again later.",
-            retryAfter: ttl > 0 ? ttl : windowDuration,
+            retryAfter: windowDuration,
             limit,
             remaining: 0,
             limitType: "email",
@@ -35,22 +34,23 @@ const rateLimit = ({
         res.set({
           "X-RateLimit-Limit": limit,
           "X-RateLimit-Remaining": Math.max(0, limit - current),
-          "X-RateLimit-Reset": new Date(Date.now() + ttl * 1000).toISOString(),
+          "X-RateLimit-Reset": new Date(
+            Date.now() + windowDuration * 1000
+          ).toISOString(),
           "X-RateLimit-Type": "email",
         });
       } else if (strategy === "ip") {
         // Single IP check
         const ipKey = `${keyPrefix}:ip:${req.ip}`;
         multi.incr(ipKey);
-        multi.ttl(ipKey);
         multi.expire(ipKey, windowDuration);
 
-        const [current, ttl] = await multi.exec();
+        const [current] = await multi.exec();
 
         if (current > limit) {
           return res.status(429).json({
             error: "Rate limit exceeded (IP). Please try again later.",
-            retryAfter: ttl > 0 ? ttl : windowDuration,
+            retryAfter: windowDuration,
             limit,
             remaining: 0,
             limitType: "ip",
@@ -60,7 +60,9 @@ const rateLimit = ({
         res.set({
           "X-RateLimit-Limit": limit,
           "X-RateLimit-Remaining": Math.max(0, limit - current),
-          "X-RateLimit-Reset": new Date(Date.now() + ttl * 1000).toISOString(),
+          "X-RateLimit-Reset": new Date(
+            Date.now() + windowDuration * 1000
+          ).toISOString(),
           "X-RateLimit-Type": "ip",
         });
       } else if (strategy === "hybrid") {
@@ -74,23 +76,21 @@ const rateLimit = ({
 
         if (emailKey) {
           multi.incr(emailKey);
-          multi.ttl(emailKey);
           multi.expire(emailKey, windowDuration);
         }
         multi.incr(ipKey);
-        multi.ttl(ipKey);
         multi.expire(ipKey, actualIpWindow);
 
         const results = await multi.exec();
 
         // Process email check (if exists)
         if (emailKey) {
-          const [emailCurrent, emailTtl] = results.slice(0, 2);
+          const emailCurrent = results[0];
 
           if (emailCurrent > limit) {
             return res.status(429).json({
               error: "Rate limit exceeded (email). Please try again later.",
-              retryAfter: emailTtl > 0 ? emailTtl : windowDuration,
+              retryAfter: windowDuration,
               limit,
               remaining: 0,
               limitType: "email",
@@ -99,14 +99,12 @@ const rateLimit = ({
         }
 
         // Process IP check
-        const [ipCurrent, ipTtl] = emailKey
-          ? results.slice(3, 5)
-          : results.slice(0, 2);
+        const ipCurrent = emailKey ? results[2] : results[0];
 
         if (ipCurrent > actualIpLimit) {
           return res.status(429).json({
             error: "Rate limit exceeded (IP). Please try again later.",
-            retryAfter: ipTtl > 0 ? ipTtl : actualIpWindow,
+            retryAfter: actualIpWindow,
             limit: actualIpLimit,
             remaining: 0,
             limitType: "ip",
@@ -115,12 +113,12 @@ const rateLimit = ({
 
         // Set headers for most restrictive limit (email if exists, otherwise IP)
         if (emailKey) {
-          const [emailCurrent, emailTtl] = results.slice(0, 2);
+          const emailCurrent = results[0];
           res.set({
             "X-RateLimit-Limit": limit,
             "X-RateLimit-Remaining": Math.max(0, limit - emailCurrent),
             "X-RateLimit-Reset": new Date(
-              Date.now() + emailTtl * 1000
+              Date.now() + windowDuration * 1000
             ).toISOString(),
             "X-RateLimit-Type": "email",
           });
@@ -129,7 +127,7 @@ const rateLimit = ({
             "X-RateLimit-Limit": actualIpLimit,
             "X-RateLimit-Remaining": Math.max(0, actualIpLimit - ipCurrent),
             "X-RateLimit-Reset": new Date(
-              Date.now() + ipTtl * 1000
+              Date.now() + actualIpWindow * 1000
             ).toISOString(),
             "X-RateLimit-Type": "ip",
           });
