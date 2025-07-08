@@ -16,6 +16,7 @@ const router = express.Router();
 router.post("/register", strictRateLimit, registerClient);
 
 router.get("/info", lenientRateLimit, requireClientApiKey, getClientInfo);
+
 router.post(
   "/:id/rotate-keys",
   moderateRateLimit,

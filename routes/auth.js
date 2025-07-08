@@ -29,8 +29,8 @@ router.post("/magic-link/request", magicLinkRequestLimit, requestMagicLink);
 
 router.post("/magic-link/verify", moderateRateLimit, verifyMagicLink);
 
-router.post("/refresh-token", moderateRateLimit, refreshTokens);
 router.post("/verify-token", lenientRateLimit, verifyJWT);
+router.post("/refresh-token", moderateRateLimit, refreshTokens);
 router.post("/revoke-token", moderateRateLimit, revokeRefreshToken);
 router.post("/revoke-all-tokens", strictRateLimit, revokeAllTokens);
 
