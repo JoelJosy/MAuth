@@ -9,79 +9,129 @@ const rateLimit = ({
   ipWindowDuration = null,
 }) => {
   return async (req, res, next) => {
-    const checks = [];
-
-    if (strategy === "email" && req.body.email) {
-      checks.push({
-        key: `${keyPrefix}:email:${req.body.email}`,
-        limit,
-        windowDuration,
-        type: "email",
-      });
-    } else if (strategy === "ip") {
-      checks.push({
-        key: `${keyPrefix}:ip:${req.ip}`,
-        limit,
-        windowDuration,
-        type: "ip",
-      });
-    } else if (strategy === "hybrid") {
-      if (req.body.email) {
-        checks.push({
-          key: `${keyPrefix}:email:${req.body.email}`,
-          limit,
-          windowDuration,
-          type: "email",
-        });
-      }
-      checks.push({
-        key: `${keyPrefix}:ip:${req.ip}`,
-        limit: ipLimit || Math.ceil(limit * 1.5), // Slightly higher IP limit
-        windowDuration: ipWindowDuration || windowDuration,
-        type: "ip",
-      });
-    }
-
-    // If no checks configured, fall back to IP
-    if (checks.length === 0) {
-      checks.push({
-        key: `${keyPrefix}:ip:${req.ip}`,
-        limit,
-        windowDuration,
-        type: "ip",
-      });
-    }
-
     try {
-      // Check all limits
-      for (const check of checks) {
-        const current = await redis.incr(check.key);
+      // Redis pipeline
+      const multi = redis.multi();
 
-        if (current === 1) {
-          await redis.expire(check.key, check.windowDuration);
-        }
+      if (strategy === "email" && req.body.email) {
+        // Single email check
+        const emailKey = `${keyPrefix}:email:${req.body.email}`;
+        multi.incr(emailKey);
+        multi.ttl(emailKey);
+        multi.expire(emailKey, windowDuration);
 
-        const ttl = await redis.ttl(check.key);
+        const [current, ttl] = await multi.exec();
 
-        if (current > check.limit) {
+        if (current > limit) {
           return res.status(429).json({
-            error: `Rate limit exceeded (${check.type}). Please try again later.`,
-            retryAfter: ttl > 0 ? ttl : check.windowDuration,
-            limit: check.limit,
+            error: "Rate limit exceeded (email). Please try again later.",
+            retryAfter: ttl > 0 ? ttl : windowDuration,
+            limit,
             remaining: 0,
-            limitType: check.type,
+            limitType: "email",
           });
         }
 
-        // Add headers for the most restrictive limit
-        if (check === checks[0]) {
+        res.set({
+          "X-RateLimit-Limit": limit,
+          "X-RateLimit-Remaining": Math.max(0, limit - current),
+          "X-RateLimit-Reset": new Date(Date.now() + ttl * 1000).toISOString(),
+          "X-RateLimit-Type": "email",
+        });
+      } else if (strategy === "ip") {
+        // Single IP check
+        const ipKey = `${keyPrefix}:ip:${req.ip}`;
+        multi.incr(ipKey);
+        multi.ttl(ipKey);
+        multi.expire(ipKey, windowDuration);
+
+        const [current, ttl] = await multi.exec();
+
+        if (current > limit) {
+          return res.status(429).json({
+            error: "Rate limit exceeded (IP). Please try again later.",
+            retryAfter: ttl > 0 ? ttl : windowDuration,
+            limit,
+            remaining: 0,
+            limitType: "ip",
+          });
+        }
+
+        res.set({
+          "X-RateLimit-Limit": limit,
+          "X-RateLimit-Remaining": Math.max(0, limit - current),
+          "X-RateLimit-Reset": new Date(Date.now() + ttl * 1000).toISOString(),
+          "X-RateLimit-Type": "ip",
+        });
+      } else if (strategy === "hybrid") {
+        // Hybrid: email + IP checks
+        const emailKey = req.body.email
+          ? `${keyPrefix}:email:${req.body.email}`
+          : null;
+        const ipKey = `${keyPrefix}:ip:${req.ip}`;
+        const actualIpLimit = ipLimit || Math.ceil(limit * 1.5);
+        const actualIpWindow = ipWindowDuration || windowDuration;
+
+        if (emailKey) {
+          multi.incr(emailKey);
+          multi.ttl(emailKey);
+          multi.expire(emailKey, windowDuration);
+        }
+        multi.incr(ipKey);
+        multi.ttl(ipKey);
+        multi.expire(ipKey, actualIpWindow);
+
+        const results = await multi.exec();
+
+        // Process email check (if exists)
+        if (emailKey) {
+          const [emailCurrent, emailTtl] = results.slice(0, 2);
+
+          if (emailCurrent > limit) {
+            return res.status(429).json({
+              error: "Rate limit exceeded (email). Please try again later.",
+              retryAfter: emailTtl > 0 ? emailTtl : windowDuration,
+              limit,
+              remaining: 0,
+              limitType: "email",
+            });
+          }
+        }
+
+        // Process IP check
+        const [ipCurrent, ipTtl] = emailKey
+          ? results.slice(3, 5)
+          : results.slice(0, 2);
+
+        if (ipCurrent > actualIpLimit) {
+          return res.status(429).json({
+            error: "Rate limit exceeded (IP). Please try again later.",
+            retryAfter: ipTtl > 0 ? ipTtl : actualIpWindow,
+            limit: actualIpLimit,
+            remaining: 0,
+            limitType: "ip",
+          });
+        }
+
+        // Set headers for most restrictive limit (email if exists, otherwise IP)
+        if (emailKey) {
+          const [emailCurrent, emailTtl] = results.slice(0, 2);
           res.set({
-            "X-RateLimit-Limit": check.limit,
-            "X-RateLimit-Remaining": Math.max(0, check.limit - current),
+            "X-RateLimit-Limit": limit,
+            "X-RateLimit-Remaining": Math.max(0, limit - emailCurrent),
             "X-RateLimit-Reset": new Date(
-              Date.now() + ttl * 1000
+              Date.now() + emailTtl * 1000
             ).toISOString(),
-            "X-RateLimit-Type": check.type,
+            "X-RateLimit-Type": "email",
+          });
+        } else {
+          res.set({
+            "X-RateLimit-Limit": actualIpLimit,
+            "X-RateLimit-Remaining": Math.max(0, actualIpLimit - ipCurrent),
+            "X-RateLimit-Reset": new Date(
+              Date.now() + ipTtl * 1000
+            ).toISOString(),
+            "X-RateLimit-Type": "ip",
           });
         }
       }
