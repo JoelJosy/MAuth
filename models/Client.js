@@ -42,6 +42,23 @@ const clientSchema = new mongoose.Schema(
       type: Date,
       default: null,
     },
+    // Redirect URL for OAuth flows
+    redirectUrl: {
+      type: String,
+      required: true,
+      validate: {
+        validator: function (url) {
+          // Basic URL validation
+          try {
+            new URL(url);
+            return true;
+          } catch (e) {
+            return false;
+          }
+        },
+        message: "Invalid redirect URL format",
+      },
+    },
   },
   { timestamps: true }
 );

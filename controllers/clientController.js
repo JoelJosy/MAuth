@@ -8,9 +8,22 @@ import { encryptPrivateKey } from "../utils/encryptKeys.js";
 import Client from "../models/Client.js";
 
 const registerClient = async (req, res) => {
-  const { name } = req.body;
+  const { name, redirectUrl } = req.body;
+
+  // Validate required fields
   if (!name) {
     return res.status(400).json({ error: "Name is required" });
+  }
+
+  if (!redirectUrl) {
+    return res.status(400).json({ error: "Redirect URL is required" });
+  }
+
+  // Validate redirect URL format
+  try {
+    new URL(redirectUrl);
+  } catch (error) {
+    return res.status(400).json({ error: "Invalid redirect URL format" });
   }
 
   try {
@@ -41,6 +54,7 @@ const registerClient = async (req, res) => {
     // Save client
     const client = await Client.create({
       name,
+      redirectUrl,
       publicKey,
       encryptedPrivateKey,
       iv,
@@ -51,6 +65,7 @@ const registerClient = async (req, res) => {
       message: "Client registered successfully",
       name: client.name,
       id: client._id,
+      redirectUrl: client.redirectUrl,
       publicKey: client.publicKey,
       apiKey: client.apiKey,
       warning:
@@ -114,6 +129,7 @@ const getClientInfo = async (req, res) => {
         id: client._id,
         name: client.name,
         kid: client.kid,
+        redirectUrl: client.redirectUrl,
         publicKey: client.publicKey,
         createdAt: client.createdAt,
         updatedAt: client.updatedAt,
