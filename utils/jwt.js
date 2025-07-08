@@ -20,6 +20,8 @@ const generateTokens = async ({
     client.iv,
     client.tag
   );
+
+  // Payloads for access and refresh tokens
   const accessTokenPayload = {
     userId,
     kid: client.kid,
@@ -33,6 +35,7 @@ const generateTokens = async ({
     iss: client.name,
   };
 
+  // Sign tokens
   const accessToken = jwt.sign(accessTokenPayload, privateKey, {
     algorithm: "RS256",
     expiresIn: ACCESS_TOKEN_EXPIRY,
@@ -65,7 +68,7 @@ const generateTokens = async ({
   return { accessToken, refreshToken };
 };
 
-// This is for development purposes only
+// for testing
 const verifyToken = async (token) => {
   try {
     // Decode the token header to get the key ID
