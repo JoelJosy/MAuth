@@ -1,7 +1,7 @@
 import express from "express";
 import cors from "cors";
 import cookieParser from "cookie-parser";
-import { PORT } from "./config/env.js";
+import { PORT, BASE_URL } from "./config/env.js";
 import connectToDatabase from "./database/mongodb.js";
 import errorMiddleware from "./middleware/error.js";
 import Client from "./models/Client.js";
@@ -17,6 +17,7 @@ const allowedOrigins = [
   "http://localhost:3000",
   "http://localhost:5173",
   "http://localhost:4173",
+  "http://localhost:5500",
 ]
   .map((origin) => origin.trim())
   .filter(Boolean);
@@ -63,6 +64,7 @@ app.get("/", (req, res) => {
 });
 
 app.listen(PORT, async () => {
-  console.log(`Server is running on http://localhost:${PORT}`);
+  const publicUrl = BASE_URL || `http://localhost:${PORT}`;
+  console.log(`Server is running on ${publicUrl}`);
   await connectToDatabase();
 });
