@@ -9,6 +9,20 @@ import { generateTokens, verifyToken } from "../utils/jwt.js";
 import { sendEmail } from "../utils/sendEmail.js";
 import { generateEmailTemplate } from "../utils/emailTemplate.js";
 
+const AUTH_CODE_TTL_SECONDS = 5 * 60;
+
+const buildRedirectUrl = (redirectUrl, params = {}) => {
+  const url = new URL(redirectUrl);
+
+  Object.entries(params).forEach(([key, value]) => {
+    if (value !== undefined && value !== null) {
+      url.searchParams.set(key, value);
+    }
+  });
+
+  return url.toString();
+};
+
 const requestMagicLink = async (req, res) => {
   const { email, id } = req.body;
   if (!email || !id) {
@@ -96,36 +110,79 @@ const verifyMagicLink = async (req, res) => {
     // Update lastLogin on successful verification
     await User.findByIdAndUpdate(userId, { lastLogin: new Date() });
 
+    const authCode = crypto.randomBytes(32).toString("hex");
+
+    await redis.setEx(
+      `auth_code:${authCode}`,
+      AUTH_CODE_TTL_SECONDS,
+      JSON.stringify({
+        userId: userId.toString(),
+        clientId: clientId.toString(),
+        redirectUrl: JSON.parse(data).redirectUrl,
+      })
+    );
+
+    return res.redirect(
+      buildRedirectUrl(JSON.parse(data).redirectUrl, {
+        code: authCode,
+        token_type: "authorization_code",
+        expires_in: String(AUTH_CODE_TTL_SECONDS),
+      })
+    );
+  } catch (error) {
+    console.error("Error verifying magic link:", error);
+    return res.status(500).json({ error: "Internal server error" });
+  }
+};
+
+const exchangeAuthorizationCode = async (req, res) => {
+  const { code } = req.body;
+
+  if (!code) {
+    return res.status(400).json({ error: "Authorization code is required" });
+  }
+
+  try {
+    const storedCode = await redis.get(`auth_code:${code}`);
+    if (!storedCode) {
+      return res.status(400).json({ error: "Invalid or expired authorization code" });
+    }
+
+    const { userId, clientId, redirectUrl } = JSON.parse(storedCode);
+
+    if (req.client._id.toString() !== clientId) {
+      return res.status(403).json({ error: "Authorization code does not belong to this client" });
+    }
+
+    await redis.del(`auth_code:${code}`);
+
     const { accessToken, refreshToken } = await generateTokens({
       userId,
       clientId,
     });
 
-    // Set tokens as HTTP-only cookies
-    res.cookie("accessToken", accessToken, {
-      httpOnly: true,
-      secure: process.env.NODE_ENV === "production",
-      sameSite: process.env.NODE_ENV === "production" ? "none" : "lax", // Better cross-origin handling
-      maxAge: 15 * 60 * 1000,
-      path: "/",
-    });
-
-    res.cookie("refreshToken", refreshToken, {
-      httpOnly: true,
-      secure: process.env.NODE_ENV === "production",
-      sameSite: "lax",
-      maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
-      path: "/",
-    });
+    const user = await User.findById(userId);
 
     return res.json({
-      message: "Magic link verified successfully, tokens set in cookies",
+      message: "Authorization code exchanged successfully",
+      tokenType: "Bearer",
+      expiresIn: 15 * 60,
+      accessToken,
+      refreshToken,
+      user: user
+        ? {
+            email: user.email,
+            lastLogin: user.lastLogin,
+          }
+        : null,
+      client: {
+        id: req.client._id,
+        name: req.client.name,
+        redirectUrl,
+      },
     });
-
-    // redirect example:
-    // return res.redirect(`${client.redirectUrl}?status=success`);
   } catch (error) {
-    console.error("Error verifying magic link:", error);
+    console.error("Error exchanging authorization code:", error);
     return res.status(500).json({ error: "Internal server error" });
   }
 };
@@ -133,7 +190,9 @@ const verifyMagicLink = async (req, res) => {
 const verifyJWT = async (req, res) => {
   // Try Authorization header first, then fall back to cookie
   const token =
-    req.headers.authorization?.split(" ")[1] || req.cookies?.accessToken;
+    req.body?.token ||
+    req.headers.authorization?.split(" ")[1] ||
+    req.cookies?.accessToken;
 
   if (!token) {
     return res.status(400).json({ error: "Access token is required" });
@@ -173,7 +232,10 @@ const verifyJWT = async (req, res) => {
 };
 
 const refreshTokens = async (req, res) => {
-  const token = req.cookies?.refreshToken;
+  const token =
+    req.body?.refreshToken ||
+    req.headers.authorization?.split(" ")[1] ||
+    req.cookies?.refreshToken;
 
   if (!token) {
     return res.status(400).json({ error: "Refresh token is missing" });
@@ -205,22 +267,13 @@ const refreshTokens = async (req, res) => {
       prevRefreshToken: token,
     });
 
-    // Set cookies
-    res.cookie("accessToken", accessToken, {
-      httpOnly: true,
-      secure: process.env.NODE_ENV === "production",
-      sameSite: "lax",
-      maxAge: 15 * 60 * 1000,
+    return res.json({
+      message: "Tokens refreshed successfully",
+      tokenType: "Bearer",
+      expiresIn: 15 * 60,
+      accessToken,
+      refreshToken,
     });
-
-    res.cookie("refreshToken", refreshToken, {
-      httpOnly: true,
-      secure: process.env.NODE_ENV === "production",
-      sameSite: "lax",
-      maxAge: 7 * 24 * 60 * 60 * 1000,
-    });
-
-    return res.json({ message: "Tokens refreshed successfully" });
   } catch (err) {
     console.error("Refresh error:", err);
     return res.status(401).json({ error: "Invalid refresh token" });
@@ -229,7 +282,10 @@ const refreshTokens = async (req, res) => {
 
 const revokeRefreshToken = async (req, res) => {
   const { revokeAll = false } = req.body;
-  const token = req.cookies?.refreshToken;
+  const token =
+    req.body?.refreshToken ||
+    req.headers.authorization?.split(" ")[1] ||
+    req.cookies?.refreshToken;
 
   if (!revokeAll && !token) {
     return res.status(400).json({
@@ -265,10 +321,6 @@ const revokeRefreshToken = async (req, res) => {
         }
       );
 
-      // Clear cookies
-      res.clearCookie("accessToken");
-      res.clearCookie("refreshToken");
-
       return res.json({
         message: "All refresh tokens revoked successfully",
         tokensRevoked: result.modifiedCount,
@@ -291,9 +343,6 @@ const revokeRefreshToken = async (req, res) => {
       existing.replacedBy = "manually_revoked";
       await existing.save();
 
-      res.clearCookie("accessToken");
-      res.clearCookie("refreshToken");
-
       return res.json({ message: "Refresh token revoked successfully" });
     }
   } catch (error) {
@@ -309,13 +358,14 @@ const revokeRefreshToken = async (req, res) => {
 };
 
 const revokeAllTokens = async (req, res) => {
-  req.body.revokeAll = true;
-  revokeRefreshToken(req, res);
+  req.body = { ...(req.body || {}), revokeAll: true };
+  return revokeRefreshToken(req, res);
 };
 
 export {
   requestMagicLink,
   verifyMagicLink,
+  exchangeAuthorizationCode,
   verifyJWT,
   refreshTokens,
   revokeRefreshToken,

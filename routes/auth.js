@@ -2,6 +2,7 @@ import express from "express";
 import {
   requestMagicLink,
   verifyMagicLink,
+  exchangeAuthorizationCode,
   verifyJWT,
   refreshTokens,
   revokeRefreshToken,
@@ -13,6 +14,7 @@ import {
   lenientRateLimit,
   rateLimit,
 } from "../middleware/rateLimit.js";
+import { requireClientApiKey } from "../middleware/clientApiKey.js";
 
 const router = express.Router();
 
@@ -27,7 +29,15 @@ const magicLinkRequestLimit = rateLimit({
 
 router.post("/magic-link/request", magicLinkRequestLimit, requestMagicLink);
 
-router.post("/magic-link/verify", moderateRateLimit, verifyMagicLink);
+router.get("/magic-link/verify", moderateRateLimit, verifyMagicLink);
+
+
+router.post(
+  "/code/exchange",
+  moderateRateLimit,
+  requireClientApiKey,
+  exchangeAuthorizationCode
+);
 
 router.post("/verify-token", lenientRateLimit, verifyJWT);
 router.post("/refresh-token", moderateRateLimit, refreshTokens);

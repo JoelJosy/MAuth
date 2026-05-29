@@ -9,7 +9,7 @@ A secure, passwordless authentication service that provides magic link authentic
 First, register your application to get API credentials:
 
 ```bash
-POST /api/client/register
+POST /api/clients/register
 Content-Type: application/json
 
 {
@@ -70,15 +70,41 @@ When the user clicks the magic link, they'll be redirected to:
 GET /api/auth/magic-link/verify?token=abc123...
 ```
 
-This automatically sets HTTP-only cookies with JWT tokens and returns:
+This redirects the browser back to your app with a short-lived authorization code:
 
 ```json
 {
-  "message": "Magic link verified successfully, tokens set in cookies"
+  "code": "one-time-auth-code"
 }
 ```
 
-#### Step 3: Verify JWT Tokens (Client-Side)
+#### Step 3: Exchange the Authorization Code
+
+Your backend redeems the code with your client API key:
+
+```bash
+POST /api/auth/code/exchange
+X-Client-API-Key: your-client-api-key
+Content-Type: application/json
+
+{
+  "code": "one-time-auth-code"
+}
+```
+
+**Response:**
+
+```json
+{
+  "message": "Authorization code exchanged successfully",
+  "tokenType": "Bearer",
+  "expiresIn": 900,
+  "accessToken": "eyJ...",
+  "refreshToken": "eyJ..."
+}
+```
+
+#### Step 4: Verify JWT Tokens (Client-Side)
 
 After receiving tokens, verify them locally using the public key you received during registration. This is more efficient and secure than making API calls for every verification.
 
@@ -88,8 +114,9 @@ After receiving tokens, verify them locally using the public key you received du
 
 ```javascript
 class MAuthClient {
-  constructor(clientId, baseUrl = "https://your-mauth-api.com/api") {
+  constructor(clientId, apiKey, baseUrl = "https://your-mauth-api.com/api") {
     this.clientId = clientId;
+    this.apiKey = apiKey;
     this.baseUrl = baseUrl;
   }
 
@@ -99,7 +126,19 @@ class MAuthClient {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ email, id: this.clientId }),
-      credentials: "include", // Important for cookies
+    });
+
+    return response.json();
+  }
+
+  async exchangeCode(code) {
+    const response = await fetch(`${this.baseUrl}/auth/code/exchange`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-Client-API-Key": this.apiKey,
+      },
+      body: JSON.stringify({ code }),
     });
 
     return response.json();
@@ -120,7 +159,10 @@ class MAuthClient {
   async refreshTokens() {
     const response = await fetch(`${this.baseUrl}/auth/refresh-token`, {
       method: "POST",
-      credentials: "include",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ refreshToken: localStorage.getItem("refreshToken") }),
     });
 
     return response.json();
@@ -130,7 +172,10 @@ class MAuthClient {
   async signOut() {
     const response = await fetch(`${this.baseUrl}/auth/revoke-token`, {
       method: "POST",
-      credentials: "include",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ refreshToken: localStorage.getItem("refreshToken") }),
     });
 
     return response.json();
@@ -138,7 +183,7 @@ class MAuthClient {
 }
 
 // Usage
-const auth = new MAuthClient("your-client-id");
+const auth = new MAuthClient("your-client-id", "your-client-api-key");
 
 // Sign in flow
 async function signIn(email) {
@@ -153,10 +198,7 @@ async function signIn(email) {
 // Check auth status (local verification)
 async function checkAuth() {
   try {
-    const token = document.cookie
-      .split("; ")
-      .find((row) => row.startsWith("accessToken="))
-      ?.split("=")[1];
+    const token = localStorage.getItem("accessToken");
 
     if (!token) {
       console.log("No token found");
@@ -187,9 +229,8 @@ import jwt from "jsonwebtoken";
 // Middleware to verify MAuth tokens (local verification)
 const verifyMAuthToken = async (req, res, next) => {
   try {
-    // Get token from Authorization header or cookies
-    const token =
-      req.headers.authorization?.split(" ")[1] || req.cookies?.accessToken;
+    // Get token from Authorization header or request body
+    const token = req.headers.authorization?.split(" ")[1];
 
     if (!token) {
       return res.status(401).json({ error: "Access token required" });
@@ -226,7 +267,7 @@ app.get("/api/protected", verifyMAuthToken, (req, res) => {
 - **One-Time Use Tokens** - Each magic link can only be used once
 - **Rate Limiting** - Built-in protection against abuse
 - **JWT Tokens** - Industry-standard authentication tokens
-- **HTTP-Only Cookies** - XSS protection for web applications
+- **Authorization Code Flow** - Keeps token exchange off the browser redirect
 - **Refresh Token Rotation** - Enhanced security for long-lived sessions
 
 ## 📡 API Reference
@@ -237,6 +278,7 @@ app.get("/api/protected", verifyMAuthToken, (req, res) => {
 | -------------------------- | ------ | ------------------------- | ------------------------- |
 | `/auth/magic-link/request` | POST   | Send magic link to email  | 5/email/5min + 15/IP/5min |
 | `/auth/magic-link/verify`  | GET    | Verify magic link token   | 10/min/IP                 |
+| `/auth/code/exchange`      | POST   | Exchange auth code for JWTs | 10/min/IP               |
 | `/auth/refresh-token`      | POST   | Refresh expired tokens    | 10/min/IP                 |
 | `/auth/revoke-token`       | POST   | Sign out (revoke tokens)  | 10/min/IP                 |
 | `/auth/revoke-all-tokens`  | POST   | Sign out from all devices | 5/email/5min + 10/IP/5min |
@@ -245,9 +287,9 @@ app.get("/api/protected", verifyMAuthToken, (req, res) => {
 
 | Endpoint                  | Method | Description              | Auth Required |
 | ------------------------- | ------ | ------------------------ | ------------- |
-| `/client/register`        | POST   | Register new application | No            |
-| `/client/info`            | GET    | Get client information   | API Key       |
-| `/client/:id/rotate-keys` | POST   | Rotate signing keys      | API Key       |
+| `/clients/register`       | POST   | Register new application | No            |
+| `/clients/info`           | GET    | Get client information   | API Key       |
+| `/clients/:id/rotate-keys` | POST   | Rotate signing keys      | API Key       |
 
 ### Request/Response Examples
 
@@ -278,15 +320,15 @@ console.log("Token payload:", payload);
 ### Get Client Information
 
 ```bash
-GET /api/client/info
-X-API-Key: mauth_live_sk_1234567890abcdef
+GET /api/clients/info
+X-Client-API-Key: mauth_live_sk_1234567890abcdef
 ```
 
 ### Rotate Signing Keys
 
 ```bash
-POST /api/client/{clientId}/rotate-keys
-X-API-Key: mauth_live_sk_1234567890abcdef
+POST /api/clients/{clientId}/rotate-keys
+X-Client-API-Key: mauth_live_sk_1234567890abcdef
 ```
 
 ## ⚠️ Important Notes
@@ -305,19 +347,15 @@ X-API-Key: mauth_live_sk_1234567890abcdef
 
 ### Automatic Token Refresh
 
-The `/auth/refresh-token` endpoint is designed to be called automatically by your client-side authentication code when access tokens expire. You typically don't need to call this manually - implement automatic refresh logic in your auth middleware for the best user experience.
+The `/auth/refresh-token` endpoint is designed to be called by your backend or auth layer when access tokens expire. In the authorization-code flow, the client app should keep the refresh token on its own side and rotate it server-side.
 
 ### CORS Configuration
 
-Make sure your frontend domain is allowed in the MAuth service CORS settings.
+The MAuth service no longer relies on cross-site cookies. Your frontend should request the magic link without `credentials: "include"`, then exchange the authorization code from your backend.
 
 ### Cookie Settings
 
-For production, ensure your domain supports:
-
-- `SameSite=None` for cross-origin requests
-- `Secure=true` for HTTPS only
-- `HttpOnly=true` for XSS protection
+Use HTTP-only cookies only on your own application domain if you choose to set a session cookie after exchanging the code.
 
 ## 🚦 Error Handling
 
