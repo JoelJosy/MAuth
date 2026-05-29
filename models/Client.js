@@ -59,6 +59,11 @@ const clientSchema = new mongoose.Schema(
         message: "Invalid redirect URL format",
       },
     },
+    // Browser origins allowed to call the API for this client
+    allowedOrigins: {
+      type: [String],
+      default: [],
+    },
   },
   { timestamps: true }
 );

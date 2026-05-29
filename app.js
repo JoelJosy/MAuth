@@ -4,11 +4,13 @@ import cookieParser from "cookie-parser";
 import { PORT } from "./config/env.js";
 import connectToDatabase from "./database/mongodb.js";
 import errorMiddleware from "./middleware/error.js";
+import Client from "./models/Client.js";
 import clientRoutes from "./routes/client.js";
 import authRoutes from "./routes/auth.js";
 import jwksRoutes from "./routes/jwks.js";
 
 const app = express();
+app.set("trust proxy", 1);
 
 const allowedOrigins = [
   ...(process.env.CLIENT_ORIGINS?.split(",") || []),
@@ -21,9 +23,18 @@ const allowedOrigins = [
 
 app.use(
   cors({
-    origin(origin, callback) {
+    origin: async (origin, callback) => {
       if (!origin || allowedOrigins.includes(origin)) {
         return callback(null, true);
+      }
+
+      try {
+        const clientOrigin = await Client.findOne({ allowedOrigins: origin }).lean();
+        if (clientOrigin) {
+          return callback(null, true);
+        }
+      } catch (error) {
+        return callback(error);
       }
 
       return callback(new Error("CORS policy does not allow this origin"));

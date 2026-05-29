@@ -1,14 +1,20 @@
 import {
   generateKeyPairSync,
-  privateDecrypt,
-  publicEncrypt,
   randomUUID,
 } from "crypto";
 import { encryptPrivateKey } from "../utils/encryptKeys.js";
 import Client from "../models/Client.js";
 
+const getOriginFromUrl = (value) => {
+  try {
+    return new URL(value).origin;
+  } catch {
+    return null;
+  }
+};
+
 const registerClient = async (req, res) => {
-  const { name, redirectUrl } = req.body;
+  const { name, redirectUrl, allowedOrigins = [] } = req.body;
 
   // Validate required fields
   if (!name) {
@@ -25,6 +31,19 @@ const registerClient = async (req, res) => {
   } catch (error) {
     return res.status(400).json({ error: "Invalid redirect URL format" });
   }
+
+  const normalizedAllowedOrigins = [
+    ...(Array.isArray(allowedOrigins)
+      ? allowedOrigins
+      : typeof allowedOrigins === "string"
+        ? [allowedOrigins]
+        : []),
+    getOriginFromUrl(redirectUrl),
+  ]
+    .filter(Boolean)
+    .map((origin) => origin.trim());
+
+  const uniqueAllowedOrigins = [...new Set(normalizedAllowedOrigins)];
 
   try {
     // check if client already exists
@@ -55,6 +74,7 @@ const registerClient = async (req, res) => {
     const client = await Client.create({
       name,
       redirectUrl,
+      allowedOrigins: uniqueAllowedOrigins,
       publicKey,
       encryptedPrivateKey,
       iv,
@@ -66,10 +86,11 @@ const registerClient = async (req, res) => {
       name: client.name,
       id: client._id,
       redirectUrl: client.redirectUrl,
+      allowedOrigins: client.allowedOrigins,
       publicKey: client.publicKey,
       apiKey: client.apiKey,
       warning:
-        "Store this API key securely! You'll need it for all client operations.",
+        "Store this API key securely. The backend uses the registered allowedOrigins list for browser requests.",
     });
   } catch (error) {
     console.error("Error registering client:", error);
@@ -130,6 +151,7 @@ const getClientInfo = async (req, res) => {
         name: client.name,
         kid: client.kid,
         redirectUrl: client.redirectUrl,
+        allowedOrigins: client.allowedOrigins,
         publicKey: client.publicKey,
         createdAt: client.createdAt,
         updatedAt: client.updatedAt,

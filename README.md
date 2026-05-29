@@ -9,12 +9,13 @@ A secure, passwordless authentication service that provides magic link authentic
 First, register your application to get API credentials:
 
 ```bash
-POST /api/clients/register
+POST /clients/register
 Content-Type: application/json
 
 {
   "name": "My Awesome App",
-  "redirectUrl": "https://myapp.com/auth/callback"
+  "redirectUrl": "https://myapp.com/auth/callback",
+  "allowedOrigins": ["https://myapp.com"]
 }
 ```
 
@@ -29,12 +30,14 @@ Content-Type: application/json
     "apiKey": "mauth_live_sk_1234567890abcdef",
     "kid": "key_abc123",
     "publicKey": "-----BEGIN PUBLIC KEY-----\n...",
-    "redirectUrl": "https://myapp.com/auth/callback"
+    "redirectUrl": "https://myapp.com/auth/callback",
+    "allowedOrigins": ["https://myapp.com"]
   }
 }
 ```
 
 ⚠️ **Save your `apiKey` and `id` securely - you'll need them for all API calls.**
+If your frontend runs on a different origin from your callback URL, include it in `allowedOrigins` at registration.
 
 ### 2. Implement Authentication Flow
 
@@ -43,7 +46,7 @@ Content-Type: application/json
 When a user wants to sign in, send their email to get a magic link:
 
 ```bash
-POST /api/auth/magic-link/request
+POST /auth/magic-link/request
 Content-Type: application/json
 
 {
@@ -67,23 +70,17 @@ The user will receive an email with a secure magic link that expires in 10 minut
 When the user clicks the magic link, they'll be redirected to:
 
 ```
-GET /api/auth/magic-link/verify?token=abc123...
+GET /auth/magic-link/verify?token=abc123...
 ```
 
-This redirects the browser back to your app with a short-lived authorization code:
-
-```json
-{
-  "code": "one-time-auth-code"
-}
-```
+This redirects the browser back to your app with a short-lived authorization code in the query string.
 
 #### Step 3: Exchange the Authorization Code
 
 Your backend redeems the code with your client API key:
 
 ```bash
-POST /api/auth/code/exchange
+POST /auth/code/exchange
 X-Client-API-Key: your-client-api-key
 Content-Type: application/json
 
@@ -104,6 +101,12 @@ Content-Type: application/json
 }
 ```
 
+#### What "allowedOrigins" Means
+
+`allowedOrigins` is the list of browser origins that may call the API for that client. If a client registers `https://app.example.com` as its frontend, that origin is allowed to make browser requests such as requesting a magic link. If the frontend is hosted elsewhere from the callback URL, register both origins explicitly.
+
+For local development you can still keep `http://localhost:3000`, `http://localhost:5173`, or `http://localhost:4173` in your server environment, but remove them in production if you do not want them accepted.
+
 #### Step 4: Verify JWT Tokens (Client-Side)
 
 After receiving tokens, verify them locally using the public key you received during registration. This is more efficient and secure than making API calls for every verification.
@@ -114,7 +117,7 @@ After receiving tokens, verify them locally using the public key you received du
 
 ```javascript
 class MAuthClient {
-  constructor(clientId, apiKey, baseUrl = "https://your-mauth-api.com/api") {
+  constructor(clientId, apiKey, baseUrl = "https://your-mauth-api.com") {
     this.clientId = clientId;
     this.apiKey = apiKey;
     this.baseUrl = baseUrl;
@@ -220,6 +223,10 @@ async function checkAuth() {
   }
 }
 ```
+
+### API Routes Summary
+
+The API is mounted at the root, so use `/clients`, `/auth`, and `/.well-known/jwks.json` directly unless you place the service behind a proxy that adds a prefix.
 
 ### Backend (Node.js/Express)
 
