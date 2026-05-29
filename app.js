@@ -10,10 +10,29 @@ import jwksRoutes from "./routes/jwks.js";
 
 const app = express();
 
+const allowedOrigins = [
+  ...(process.env.CLIENT_ORIGINS?.split(",") || []),
+  "http://localhost:3000",
+  "http://localhost:5173",
+  "http://localhost:4173",
+]
+  .map((origin) => origin.trim())
+  .filter(Boolean);
+
 app.use(
   cors({
-    origin: true,
+    origin(origin, callback) {
+      if (!origin || allowedOrigins.includes(origin)) {
+        return callback(null, true);
+      }
+
+      return callback(new Error("CORS policy does not allow this origin"));
+    },
     credentials: false,
+    methods: ["GET", "POST", "OPTIONS"],
+    allowedHeaders: ["Content-Type", "Authorization", "X-Client-API-Key"],
+    exposedHeaders: ["Location"],
+    maxAge: 600,
   })
 );
 

@@ -8,6 +8,7 @@ export const {
   PRIVATE_KEY_ENCRYPTION_KEY,
   REDIS_URL,
   BASE_URL,
+  CLIENT_ORIGINS,
   EMAIL_PASSWORD,
   EMAIL_ID,
 } = process.env;
